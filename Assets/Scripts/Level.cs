@@ -1,124 +1,271 @@
-using UnityEngine;
+﻿using UnityEngine;
+using Shapes;
 
 public class Level : MonoBehaviour
 {
+	public enum WinConditionMode
+	{
+		MeetInsideRange,
+		ConfirmPressInsideRange
+	}
+
 	[Header("References")]
-	public Transform line;
-	public Transform markedRange;
-	public Transform dotLeft;
-	public Transform dotRight;
+	[SerializeField] private Polyline _line;
+	[SerializeField] private Polyline _goalRange;
+	[SerializeField] private Disc _leftDot;
+	[SerializeField] private Disc _rightDot;
 
 	[Header("Settings")]
-	public float dotSpeed = 3f;
-	public Vector2 lineExtent = new Vector2(-5f, 5f);
-	public float markedRangeMinWidth = 0.5f;
-	public float markedRangeMaxWidth = 2f;
+	[SerializeField] private WinConditionMode _winConditionMode;
+	[SerializeField] private float _dotSpeed;
+	[SerializeField] private float _goalRangeMinWidth;
+	[SerializeField] private float _goalRangeMaxWidth;
+	[SerializeField] private float _goalRangeMargins;
+	[SerializeField] private float _leftAndRightMargins;
 
-	private bool leftLaunched;
-	private bool rightLaunched;
-	private bool levelActive = true;
+	private bool _leftLaunched;
+	private bool _rightLaunched;
+	private bool _leftConfirmed;
+	private bool _rightConfirmed;
+	private bool _levelActive;
+	private Color _originalDotsColor;
 
-	private float markedLeft;
-	private float markedRight;
+	private void Awake()
+	{
+		_originalDotsColor = _leftDot.Color;
+	}
 
-	void Start()
+	private void Start()
 	{
 		GenerateNewLevel();
 	}
 
-	void Update()
+	private void Update()
 	{
-		if (!levelActive) return;
+		if (!_levelActive)
+		{
+			return;
+		}
 
 		HandleInput();
 
 		// Move dots
-		if (leftLaunched)
-			dotLeft.position += Vector3.right * dotSpeed * Time.deltaTime;
-		if (rightLaunched)
-			dotRight.position += Vector3.left * dotSpeed * Time.deltaTime;
+		if (_leftLaunched)
+		{
+			_leftDot.transform.position += Vector3.right * _dotSpeed * Time.deltaTime;
+		}
+
+		if (_rightLaunched)
+		{
+			_rightDot.transform.position += Vector3.left * _dotSpeed * Time.deltaTime;
+		}
 
 		// Check meeting point
-		if (dotLeft.position.x >= dotRight.position.x)
+		if (_winConditionMode == WinConditionMode.MeetInsideRange && _leftDot.transform.position.x >= _rightDot.transform.position.x)
 		{
-			levelActive = false;
+			_levelActive = false;
+
 			CheckWinCondition();
+		}
+		else if (_winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+		{
+			if (_leftConfirmed && _rightConfirmed)
+			{
+				Debug.Log("Success!");
+
+				GenerateNewLevel();
+			}
+
+			// If dots cross each other before confirmations => failure
+			if (_leftDot.transform.position.x > _goalRange.transform.position.x + _goalRange.points[_goalRange.points.Count - 1].point.x 
+				|| _rightDot.transform.position.x < _goalRange.transform.position.x + _goalRange.points[0].point.x)
+			{
+				ResetLevel();
+			}
 		}
 	}
 
-	void HandleInput()
+	private void HandleInput()
 	{
-		// Keyboard
-		if (!leftLaunched && Input.GetKeyDown(KeyCode.A))
-			leftLaunched = true;
-		if (!rightLaunched && Input.GetKeyDown(KeyCode.L))
-			rightLaunched = true;
-
 		// Touch input (mobile)
-		if (Input.touchCount > 0)
+		for (var i = 0; i < Input.touchCount; i++)
 		{
-			foreach (Touch t in Input.touches)
+			var touch = Input.GetTouch(i);
+
+			if (touch.phase != TouchPhase.Began)
 			{
-				if (t.phase == TouchPhase.Began)
-				{
-					Vector3 worldPos = Camera.main.ScreenToWorldPoint(t.position);
-					if (worldPos.x < 0 && !leftLaunched)
-						leftLaunched = true;
-					else if (worldPos.x >= 0 && !rightLaunched)
-						rightLaunched = true;
-				}
+				continue;
 			}
+
+			var worldPos = Camera.main.ScreenToWorldPoint(touch.position);
+
+			if (worldPos.x < 0)
+			{
+				HandleLeftInput();
+			}
+			else
+			{
+				HandleRightInput();
+			}
+		}
+
+		if (Input.GetKeyDown(KeyCode.A))
+		{
+			HandleLeftInput();
+		}
+		
+		if(Input.GetKeyDown(KeyCode.L))
+		{
+			HandleRightInput();
 		}
 
 		// Mouse input (for testing mobile on desktop)
 		if (Input.GetMouseButtonDown(0))
 		{
-			Vector3 worldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-			if (worldPos.x < 0 && !leftLaunched)
-				leftLaunched = true;
-			else if (worldPos.x >= 0 && !rightLaunched)
-				rightLaunched = true;
+			var worldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+
+			if (worldPos.x < 0 && !_leftLaunched)
+			{
+				HandleLeftInput();
+			}
+			else if (worldPos.x >= 0 && !_rightLaunched)
+			{
+				HandleRightInput();
+			}
+		}
+
+		if(Input.GetKeyDown(KeyCode.Return))
+		{
+			GenerateNewLevel();
 		}
 	}
 
-	void CheckWinCondition()
+	private void HandleLeftInput()
 	{
-		float meetX = (dotLeft.position.x + dotRight.position.x) * 0.5f;
-		bool success = meetX >= markedLeft && meetX <= markedRight;
+		// If not launched yet: launch
+		if (!_leftLaunched)
+		{
+			_leftLaunched = true;
+
+			return;
+		}
+
+		// If using confirm-inside-range mode: treat as confirmation
+		if (_winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+		{
+			if (IsInsideGoalRange(_leftDot))
+			{
+				_leftConfirmed = true;
+
+				_leftDot.Color = _goalRange.Color;
+			}
+		}
+	}
+
+	private void HandleRightInput()
+	{
+		if (!_rightLaunched)
+		{
+			_rightLaunched = true;
+
+			return;
+		}
+
+		if (_winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+		{
+			if (IsInsideGoalRange(_rightDot))
+			{
+				_rightConfirmed = true;
+
+				_rightDot.Color = _goalRange.Color;
+			}
+		}
+	}
+
+	private bool IsInsideGoalRange(Disc dot)
+	{
+		var dotX = dot.transform.position.x;
+
+		var leftGoalX = _goalRange.transform.position.x + _goalRange.points[0].point.x;
+		var rightGoalX = _goalRange.transform.position.x + _goalRange.points[_goalRange.points.Count - 1].point.x;
+
+		return dotX >= leftGoalX && dotX <= rightGoalX;
+	}
+
+	private void CheckWinCondition()
+	{
+		var meetX = (_leftDot.transform.position.x + _rightDot.transform.position.x) * 0.5f;
+
+		var leftGoalX = _goalRange.transform.position.x + _goalRange.points[0].point.x;
+		var rightGoalX = _goalRange.transform.position.x + _goalRange.points[_goalRange.points.Count - 1].point.x;
+
+		var success = meetX >= leftGoalX && meetX <= rightGoalX;
 
 		if (success)
 		{
 			Debug.Log("Success!");
-			Invoke(nameof(GenerateNewLevel), 1f);
+
+			GenerateNewLevel();
 		}
 		else
 		{
 			Debug.Log("Missed. Try again.");
-			Invoke(nameof(ResetLevel), 1f);
+
+			ResetLevel();
 		}
 	}
 
-	void GenerateNewLevel()
+	private void GenerateNewLevel()
 	{
-		float rangeWidth = Random.Range(markedRangeMinWidth, markedRangeMaxWidth);
-		float center = Random.Range(lineExtent.x + rangeWidth / 2f, lineExtent.y - rangeWidth / 2f);
+		var camHalfHeight = Camera.main.orthographicSize;
+		var camHalfWidth = Camera.main.aspect * camHalfHeight;
 
-		markedRange.position = new Vector3(center, 0f, 0f);
-		markedRange.localScale = new Vector3(rangeWidth, markedRange.localScale.y, 1f);
+		var leftX = Camera.main.transform.position.x - camHalfWidth + _leftAndRightMargins;
+		var rightX = Camera.main.transform.position.x + camHalfWidth - _leftAndRightMargins;
 
-		markedLeft = center - rangeWidth / 2f;
-		markedRight = center + rangeWidth / 2f;
+		_line.SetPoints(new Vector3[] 
+		{ 
+			new Vector3(leftX, 0f, 0f), 
+			new Vector3(rightX, 0f, 0f)
+		});
+
+		var rangeWidth = Random.Range(_goalRangeMinWidth, _goalRangeMaxWidth);
+
+		_goalRange.transform.position = new Vector3(
+			Random.Range(
+				leftX + _goalRangeMargins + rangeWidth / 2f, 
+				rightX - _goalRangeMargins - rangeWidth / 2f), 
+			0f, 
+			0f);
+
+		_goalRange.SetPoints(new Vector3[]{ 
+			new Vector3(- rangeWidth / 2f, 0f, 0f), 
+			new Vector3(+ rangeWidth / 2f, 0f, 0f) });
 
 		ResetDots();
+
+		_leftConfirmed = false;
+		_rightConfirmed = false;
+
+		_levelActive = true;
 	}
 
-	void ResetLevel() => ResetDots();
-
-	void ResetDots()
+	private void ResetLevel()
 	{
-		dotLeft.position = new Vector3(lineExtent.x, 0f, 0f);
-		dotRight.position = new Vector3(lineExtent.y, 0f, 0f);
-		leftLaunched = rightLaunched = false;
-		levelActive = true;
+		ResetDots();
+
+		_leftConfirmed = false;
+		_rightConfirmed = false;
+	}
+
+	private void ResetDots()
+	{
+		_leftDot.transform.position = _line.points[0].point;
+		_rightDot.transform.position = _line.points[_line.points.Count - 1].point;
+		_leftLaunched = _rightLaunched = false;
+		_levelActive = true;
+
+		_leftDot.Color = _originalDotsColor;
+		_rightDot.Color = _originalDotsColor;
 	}
 }
