@@ -33,6 +33,12 @@ public class Level : MonoBehaviour
 	[SerializeField, Tooltip("How many samples per spline segment (higher = smoother & more accurate distance mapping).")] private int _samplesPerSegment = 12;
 	[SerializeField, Tooltip("Random seed (0 = random seed).")] private int _seed = 0;
 
+	[Header("Dot Slowdown (hold-to-slow)")]
+	[SerializeField, Tooltip("Minimum speed multiplier while holding (fraction of base speed).")] private float _minSpeedMultiplier = 0.25f;
+	[SerializeField, Tooltip("How fast speed decreases while holding (multiplier per second).")] private float _slowdownRate = 1.0f;
+	[SerializeField, Tooltip("How fast speed recovers when released (multiplier per second).")] private float _recoveryRate = 4.0f;
+	[SerializeField, Tooltip("How long the player must hold before it counts as a 'hold' (seconds). Short taps won't slow).")] private float _holdTimeThreshold = 0.12f;
+
 	// runtime state
 	private bool _leftLaunched;
 	private bool _rightLaunched;
@@ -54,6 +60,30 @@ public class Level : MonoBehaviour
 	private float _goalStartDistance;
 	private float _goalEndDistance;
 
+	// slowdown state (per player)
+	private float _leftSpeedMultiplier = 1f;
+	private float _rightSpeedMultiplier = 1f;
+
+	private bool _leftHolding = false;
+	private bool _rightHolding = false;
+
+	// hold / tap detection timers & IDs
+	private float _leftHoldStart = 0f;
+	private float _rightHoldStart = 0f;
+
+	private bool _leftKeyActive = false;
+	private bool _rightKeyActive = false;
+
+	private bool _leftMouseActive = false;
+	private bool _rightMouseActive = false;
+	private float _leftMouseStart = 0f;
+	private float _rightMouseStart = 0f;
+
+	private int? _leftTouchId = null;
+	private int? _rightTouchId = null;
+	private float _leftTouchStart = 0f;
+	private float _rightTouchStart = 0f;
+
 	private System.Random _rng;
 
 	private void Start()
@@ -70,21 +100,61 @@ public class Level : MonoBehaviour
 	{
 		if (!_levelActive) return;
 
-		HandleInput();
+		// Reset holding flags; HandleInput() and touch processing will set them appropriately per-frame
+		_leftHolding = false;
+		_rightHolding = false;
 
-		// Move dots along the spline by distance (constant speed)
-		float delta = _dotSpeed * Time.deltaTime;
+		HandleInput(); // this also handles hold/tap detection state transitions
+
+		// ---- SPEED CONTROL ----
+		// Update left multiplier
+		if (_leftLaunched)
+		{
+			if (_leftHolding)
+			{
+				_leftSpeedMultiplier = Mathf.Max(_minSpeedMultiplier, _leftSpeedMultiplier - _slowdownRate * Time.deltaTime);
+			}
+			else
+			{
+				_leftSpeedMultiplier = Mathf.Min(1f, _leftSpeedMultiplier + _recoveryRate * Time.deltaTime);
+			}
+		}
+		else
+		{
+			_leftSpeedMultiplier = 1f;
+		}
+
+		// Update right multiplier
+		if (_rightLaunched)
+		{
+			if (_rightHolding)
+			{
+				_rightSpeedMultiplier = Mathf.Max(_minSpeedMultiplier, _rightSpeedMultiplier - _slowdownRate * Time.deltaTime);
+			}
+			else
+			{
+				_rightSpeedMultiplier = Mathf.Min(1f, _rightSpeedMultiplier + _recoveryRate * Time.deltaTime);
+			}
+		}
+		else
+		{
+			_rightSpeedMultiplier = 1f;
+		}
+
+		// Move dots along the spline by distance (speed multiplied)
+		float deltaLeft = _dotSpeed * _leftSpeedMultiplier * Time.deltaTime;
+		float deltaRight = _dotSpeed * _rightSpeedMultiplier * Time.deltaTime;
 
 		if (_leftLaunched)
 		{
-			_leftDistance = Mathf.Min(_pathLength, _leftDistance + delta);
+			_leftDistance = Mathf.Min(_pathLength, _leftDistance + deltaLeft);
 			Vector3 pos = GetPositionAtDistance(_leftDistance);
 			_leftDot.transform.position = pos;
 		}
 
 		if (_rightLaunched)
 		{
-			_rightDistance = Mathf.Max(0f, _rightDistance - delta);
+			_rightDistance = Mathf.Max(0f, _rightDistance - deltaRight);
 			Vector3 pos = GetPositionAtDistance(_rightDistance);
 			_rightDot.transform.position = pos;
 		}
@@ -111,7 +181,7 @@ public class Level : MonoBehaviour
 
 			var fail = false;
 
-			if(_leftDistance > _goalEndDistance)
+			if (_leftDistance > _goalEndDistance)
 			{
 				_leftDot.Color = Color.red;
 
@@ -138,41 +208,275 @@ public class Level : MonoBehaviour
 
 	private void HandleInput()
 	{
-		// Touch input (mobile)
+		// -------- TOUCH INPUT (supports tap vs hold) --------
+		// We map touches to left/right by their world X at touch start and track finger ids
+		// Begin: register touch start & possibly launch; Stationary/Moved: treat as holding if past threshold; Ended: decide tap vs hold
 		if (Input.touchCount > 0)
 		{
-			foreach (Touch t in Input.touches)
+			// For every active touch, if it's a new one assign to left or right slot if available
+			for (int i = 0; i < Input.touchCount; i++)
 			{
-				if (t.phase != TouchPhase.Began) continue;
-				Vector3 worldPos = Camera.main.ScreenToWorldPoint(t.position);
+				Touch t = Input.GetTouch(i);
 
-				if (worldPos.x < Camera.main.transform.position.x)
-					HandleLeftPlayerInput();
-				else
-					HandleRightPlayerInput();
+				if (t.phase == TouchPhase.Began)
+				{
+					Vector3 worldPos = Camera.main.ScreenToWorldPoint(t.position);
+					bool isLeftSide = worldPos.x < Camera.main.transform.position.x;
+
+					if (isLeftSide)
+					{
+						// register left touch if none
+						if (_leftTouchId == null)
+						{
+							_leftTouchId = t.fingerId;
+							_leftTouchStart = Time.time;
+
+							// Launch if not yet launched
+							if (!_leftLaunched)
+							{
+								_leftLaunched = true;
+							}
+						}
+					}
+					else
+					{
+						if (_rightTouchId == null)
+						{
+							_rightTouchId = t.fingerId;
+							_rightTouchStart = Time.time;
+
+							if (!_rightLaunched)
+							{
+								_rightLaunched = true;
+							}
+						}
+					}
+				}
+				else if (t.phase == TouchPhase.Stationary || t.phase == TouchPhase.Moved)
+				{
+					// check if this touch maps to left or right and whether it has passed the threshold
+					if (_leftTouchId == t.fingerId)
+					{
+						if (_leftLaunched && Time.time - _leftTouchStart >= _holdTimeThreshold)
+							_leftHolding = true;
+					}
+					else if (_rightTouchId == t.fingerId)
+					{
+						if (_rightLaunched && Time.time - _rightTouchStart >= _holdTimeThreshold)
+							_rightHolding = true;
+					}
+				}
+				else if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
+				{
+					// finalize: determine tap vs hold for the touch that ended
+					if (_leftTouchId == t.fingerId)
+					{
+						float duration = Time.time - _leftTouchStart;
+						if (duration < _holdTimeThreshold)
+						{
+							// tap: if already launched, treat as a tap press (confirm attempt), otherwise it already launched on began
+							if (_leftLaunched && _winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+							{
+								if (IsDistanceInsideGoal(_leftDistance))
+								{
+									player1Confirmed = true;
+									_leftDot.Color = _goalRange.Color;
+									Debug.Log("Player 1 confirmed (tap).");
+								}
+							}
+						}
+						// clear
+						_leftTouchId = null;
+						_leftHolding = false;
+						_leftTouchStart = 0f;
+					}
+					else if (_rightTouchId == t.fingerId)
+					{
+						float duration = Time.time - _rightTouchStart;
+						if (duration < _holdTimeThreshold)
+						{
+							if (_rightLaunched && _winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+							{
+								if (IsDistanceInsideGoal(_rightDistance))
+								{
+									player2Confirmed = true;
+									_rightDot.Color = _goalRange.Color;
+									Debug.Log("Player 2 confirmed (tap).");
+								}
+							}
+						}
+						_rightTouchId = null;
+						_rightHolding = false;
+						_rightTouchStart = 0f;
+					}
+				}
 			}
 		}
+		else
+		{
+			// no touches: ensure touch slots are cleared of holding state (they will be cleared on Ended but safe guard)
+			// do not forcibly null the ids here so that quick taps are still processed by Ended events in the same frame
+		}
 
-		// Keyboard input
-		if (Input.GetKeyDown(KeyCode.A)) HandleLeftPlayerInput();
-		if (Input.GetKeyDown(KeyCode.L)) HandleRightPlayerInput();
-
-		// Mouse (desktop testing for taps)
+		// -------- MOUSE INPUT (editor / desktop) --------
+		// Left mouse button down: register which side; hold detection via GetMouseButton and release via GetMouseButtonUp
 		if (Input.GetMouseButtonDown(0))
 		{
 			Vector3 worldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
 			if (worldPos.x < Camera.main.transform.position.x)
-				HandleLeftPlayerInput();
+			{
+				_leftMouseActive = true;
+				_leftMouseStart = Time.time;
+				if (!_leftLaunched) _leftLaunched = true;
+			}
 			else
-				HandleRightPlayerInput();
+			{
+				_rightMouseActive = true;
+				_rightMouseStart = Time.time;
+				if (!_rightLaunched) _rightLaunched = true;
+			}
 		}
 
-		// debug: regenerate
-		if (Input.GetKeyDown(KeyCode.Return)) GenerateNewLevel();
+		if (Input.GetMouseButton(0))
+		{
+			Vector3 worldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+			if (worldPos.x < Camera.main.transform.position.x)
+			{
+				if (_leftLaunched && _leftMouseActive && Time.time - _leftMouseStart >= _holdTimeThreshold)
+					_leftHolding = true;
+			}
+			else
+			{
+				if (_rightLaunched && _rightMouseActive && Time.time - _rightMouseStart >= _holdTimeThreshold)
+					_rightHolding = true;
+			}
+		}
+
+		if (Input.GetMouseButtonUp(0))
+		{
+			// On release, decide tap vs hold for mouse
+			Vector3 worldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+			bool wasLeftSide = worldPos.x < Camera.main.transform.position.x;
+
+			if (wasLeftSide && _leftMouseActive)
+			{
+				float dur = Time.time - _leftMouseStart;
+				if (dur < _holdTimeThreshold)
+				{
+					// tap
+					if (_leftLaunched && _winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+					{
+						if (IsDistanceInsideGoal(_leftDistance))
+						{
+							player1Confirmed = true;
+							_leftDot.Color = _goalRange.Color;
+							Debug.Log("Player 1 confirmed (mouse tap).");
+						}
+					}
+				}
+				_leftMouseActive = false;
+				_leftHolding = false;
+				_leftMouseStart = 0f;
+			}
+			else if (!wasLeftSide && _rightMouseActive)
+			{
+				float dur = Time.time - _rightMouseStart;
+				if (dur < _holdTimeThreshold)
+				{
+					if (_rightLaunched && _winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+					{
+						if (IsDistanceInsideGoal(_rightDistance))
+						{
+							player2Confirmed = true;
+							_rightDot.Color = _goalRange.Color;
+							Debug.Log("Player 2 confirmed (mouse tap).");
+						}
+					}
+				}
+				_rightMouseActive = false;
+				_rightHolding = false;
+				_rightMouseStart = 0f;
+			}
+		}
+
+		// -------- KEYBOARD INPUT (A / L) --------
+		// KeyDown registers launch and start timer; Key (held) used to determine hold; KeyUp decides tap vs hold
+		if (Input.GetKeyDown(KeyCode.A))
+		{
+			_leftKeyActive = true;
+			_leftHoldStart = Time.time;
+			if (!_leftLaunched) _leftLaunched = true;
+		}
+		if (Input.GetKeyUp(KeyCode.A))
+		{
+			float dur = Time.time - _leftHoldStart;
+			_leftKeyActive = false;
+			_leftHolding = false;
+			_leftHoldStart = 0f;
+
+			if (dur < _holdTimeThreshold)
+			{
+				// tap
+				if (_leftLaunched && _winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+				{
+					if (IsDistanceInsideGoal(_leftDistance))
+					{
+						player1Confirmed = true;
+						_leftDot.Color = _goalRange.Color;
+						Debug.Log("Player 1 confirmed (keyboard tap).");
+					}
+				}
+			}
+		}
+		// If key is currently down, check if it counts as a hold
+		if (Input.GetKey(KeyCode.A))
+		{
+			if (_leftLaunched && _leftKeyActive && Time.time - _leftHoldStart >= _holdTimeThreshold)
+				_leftHolding = true;
+		}
+
+		if (Input.GetKeyDown(KeyCode.L))
+		{
+			_rightKeyActive = true;
+			_rightHoldStart = Time.time;
+			if (!_rightLaunched) _rightLaunched = true;
+		}
+		if (Input.GetKeyUp(KeyCode.L))
+		{
+			float dur = Time.time - _rightHoldStart;
+			_rightKeyActive = false;
+			_rightHolding = false;
+			_rightHoldStart = 0f;
+
+			if (dur < _holdTimeThreshold)
+			{
+				// tap
+				if (_rightLaunched && _winConditionMode == WinConditionMode.ConfirmPressInsideRange)
+				{
+					if (IsDistanceInsideGoal(_rightDistance))
+					{
+						player2Confirmed = true;
+						_rightDot.Color = _goalRange.Color;
+						Debug.Log("Player 2 confirmed (keyboard tap).");
+					}
+				}
+			}
+		}
+		if (Input.GetKey(KeyCode.L))
+		{
+			if (_rightLaunched && _rightKeyActive && Time.time - _rightHoldStart >= _holdTimeThreshold)
+				_rightHolding = true;
+		}
+
+		// Debug / manual regenerate
+		if (Input.GetKeyDown(KeyCode.Return))
+			GenerateNewLevel();
 	}
 
+	// --- Left/Right input helpers (kept for compatibility with earlier code)
 	private void HandleLeftPlayerInput()
 	{
+		// previous tap-based launching / confirm behavior still works if called directly
 		if (!_leftLaunched)
 		{
 			_leftLaunched = true;
@@ -184,17 +488,15 @@ public class Level : MonoBehaviour
 			if (IsDistanceInsideGoal(_leftDistance))
 			{
 				player1Confirmed = true;
-
 				_leftDot.Color = _goalRange.Color;
-
-				// optional feedback place
-				Debug.Log("Player 1 confirmed inside goal range.");
+				Debug.Log("Player 1 confirmed (explicit method).");
 			}
 		}
 	}
 
 	private void HandleRightPlayerInput()
 	{
+		// previous tap-based launching / confirm behavior still works if called directly
 		if (!_rightLaunched)
 		{
 			_rightLaunched = true;
@@ -206,10 +508,8 @@ public class Level : MonoBehaviour
 			if (IsDistanceInsideGoal(_rightDistance))
 			{
 				player2Confirmed = true;
-
 				_rightDot.Color = _goalRange.Color;
-
-				Debug.Log("Player 2 confirmed inside goal range.");
+				Debug.Log("Player 2 confirmed (explicit method).");
 			}
 		}
 	}
@@ -533,6 +833,16 @@ public class Level : MonoBehaviour
 
 		_leftDot.Color = Color.white;
 		_rightDot.Color = Color.white;
+
+		// reset slowdown state
+		_leftSpeedMultiplier = 1f;
+		_rightSpeedMultiplier = 1f;
+		_leftHolding = false;
+		_rightHolding = false;
+
+		_leftKeyActive = _rightKeyActive = false;
+		_leftMouseActive = _rightMouseActive = false;
+		_leftTouchId = _rightTouchId = null;
 
 		_levelActive = true;
 	}
