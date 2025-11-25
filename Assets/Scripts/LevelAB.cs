@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Shapes;
 
-public class Level : MonoBehaviour
+public class LevelAB : MonoBehaviour
 {
 	public enum WinConditionMode
 	{
@@ -27,9 +27,8 @@ public class Level : MonoBehaviour
 
 	[Header("Spline / Curviness (Centripetal Catmull-Rom)")]
 	[SerializeField, Tooltip("Total number of control points including start and end. Must be >= 2.")] private int _pathControlPoints = 7;
-	[SerializeField, Tooltip("Minimum allowed distance between consecutive control points after jitter.")] private float _minControlPointSpacing = 0.5f;
-	[SerializeField, Tooltip("Maximum jitter amplitude applied to control points (X).")] private float _pathXAmplitude = 2f;
-	[SerializeField, Tooltip("Maximum jitter amplitude applied to control points (Y).")] private float _pathYAmplitude = 2f;
+	[SerializeField, Tooltip("Maximum jitter amplitude applied to control points (both X and Y when XY jitter enabled).")] private float _pathAmplitude = 2f;
+	[SerializeField, Tooltip("If true, jitter is applied on both X and Y. If false, jitter only affects Y.")] private bool _xyJitter = true;
 	[SerializeField, Tooltip("How many samples per spline segment (higher = smoother & more accurate distance mapping).")] private int _samplesPerSegment = 12;
 	[SerializeField, Tooltip("Random seed (0 = random seed).")] private int _seed = 0;
 
@@ -109,28 +108,12 @@ public class Level : MonoBehaviour
 				return;
 			}
 
-			var fail = false;
-
-			if(_leftDistance > _goalEndDistance)
-			{
-				_leftDot.Color = Color.red;
-
-				fail = true;
-			}
-
-			if (_rightDistance < _goalStartDistance)
-			{
-				_rightDot.Color = Color.red;
-
-				fail = true;
-			}
-
 			// if dots cross before confirmation => fail
-			if (fail)
+			if (_leftDistance > _goalEndDistance || _rightDistance < _goalStartDistance)
 			{
 				_levelActive = false;
 				Debug.Log("Failed: dots crossed before confirmations.");
-				Invoke(nameof(ResetLevel), 1f);
+				ResetLevel();
 				return;
 			}
 		}
@@ -184,9 +167,6 @@ public class Level : MonoBehaviour
 			if (IsDistanceInsideGoal(_leftDistance))
 			{
 				player1Confirmed = true;
-
-				_leftDot.Color = _goalRange.Color;
-
 				// optional feedback place
 				Debug.Log("Player 1 confirmed inside goal range.");
 			}
@@ -206,9 +186,6 @@ public class Level : MonoBehaviour
 			if (IsDistanceInsideGoal(_rightDistance))
 			{
 				player2Confirmed = true;
-
-				_rightDot.Color = _goalRange.Color;
-
 				Debug.Log("Player 2 confirmed inside goal range.");
 			}
 		}
@@ -232,11 +209,7 @@ public class Level : MonoBehaviour
 		else
 		{
 			Debug.Log("Missed. Try again.");
-
-			_leftDot.Color = Color.red;
-			_rightDot.Color = Color.red;
-
-			Invoke(nameof(ResetLevel), 1f);
+			ResetLevel();
 		}
 	}
 
@@ -269,37 +242,24 @@ public class Level : MonoBehaviour
 			float y = 0f;
 
 			// apply jitter
-			float jitterX = (float)(_rng.NextDouble() * 2.0 - 1.0) * _pathXAmplitude;
-			float jitterY = (float)(_rng.NextDouble() * 2.0 - 1.0) * _pathYAmplitude;
+			float jitterX = 0f;
+			float jitterY = 0f;
+			if (_xyJitter)
+			{
+				jitterX = (float)(_rng.NextDouble() * 2.0 - 1.0) * _pathAmplitude;
+				jitterY = (float)(_rng.NextDouble() * 2.0 - 1.0) * _pathAmplitude;
+			}
+			else
+			{
+				// Y-only
+				jitterY = (float)(_rng.NextDouble() * 2.0 - 1.0) * _pathAmplitude;
+			}
 
 			// ensure endpoints stay exactly at leftX/rightX horizontally (no jitter on endpoint X)
 			if (i == 0) jitterX = 0f;
 			if (i == totalPoints - 1) jitterX = 0f;
 
-			Vector3 cp = new Vector3(x + jitterX, y + jitterY, 0f);
-
-			// --- Enforce minimum spacing between consecutive control points ---
-			if (basePoints.Count > 0)
-			{
-				Vector3 prev = basePoints[basePoints.Count - 1];
-				float dist = Vector3.Distance(prev, cp);
-
-				if (dist < _minControlPointSpacing)
-				{
-					// Push cp away from prev along their direction
-					Vector3 dir = (cp - prev).normalized;
-
-					// If they are exactly overlapping (rare), choose a random direction
-					if (dir == Vector3.zero)
-						dir = UnityEngine.Random.insideUnitSphere.normalized;
-
-					cp = prev + dir * _minControlPointSpacing;
-				}
-			}
-			// -----------------------------------------------------------------
-
-			basePoints.Add(cp);
-
+			basePoints.Add(new Vector3(x + jitterX, y + jitterY, 0f));
 		}
 
 		// Build padded control list for Catmull-Rom (we'll duplicate endpoints at ends)
@@ -502,9 +462,6 @@ public class Level : MonoBehaviour
 			_leftDot.transform.position = GetPositionAtDistance(_leftDistance);
 			_rightDot.transform.position = GetPositionAtDistance(_rightDistance);
 		}
-
-		_leftDot.Color = Color.white;
-		_rightDot.Color = Color.white;
 
 		_levelActive = true;
 	}
