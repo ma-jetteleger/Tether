@@ -381,9 +381,37 @@ public class Level : MonoBehaviour
 		_goalEndDistance = Mathf.Clamp(centerDist + halfRange, 0f, _pathLength);
 
 		// Set goal polyline visuals: from start to end positions on spline
-		Vector3 g0 = GetPositionAtDistance(_goalStartDistance);
-		Vector3 g1 = GetPositionAtDistance(_goalEndDistance);
-		_goalRange.SetPoints(new Vector3[] { g0, g1 });
+		// Build goal-range polyline following the exact curve
+		List<Vector3> goalPoints = new List<Vector3>();
+
+		// --- helper: find closest sample index for a given distance
+		int FindIndex(float dist)
+		{
+			int idx = Array.BinarySearch(_cumulativeLengths, dist);
+			if (idx >= 0)
+				return idx;
+			int insert = ~idx;
+			return Mathf.Clamp(insert - 1, 0, _cumulativeLengths.Length - 1);
+		}
+
+		int startIdx = FindIndex(_goalStartDistance);
+		int endIdx = FindIndex(_goalEndDistance);
+
+		// Interpolate the exact start position
+		goalPoints.Add(GetPositionAtDistance(_goalStartDistance));
+
+		// Add all intermediate sampled points
+		for (int i = startIdx + 1; i <= endIdx; i++)
+		{
+			goalPoints.Add(_sampledPoints[i]);
+		}
+
+		// Interpolate the exact end position
+		goalPoints.Add(GetPositionAtDistance(_goalEndDistance));
+
+		// Assign to Shapes polyline
+		_goalRange.SetPoints(goalPoints.ToArray());
+
 
 		// Reset dots at start & end
 		ResetDots();

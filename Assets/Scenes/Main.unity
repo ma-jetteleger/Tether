@@ -619,8 +619,8 @@ MonoBehaviour:
   _goalRange: {fileID: 1148325663}
   _leftDot: {fileID: 501419690}
   _rightDot: {fileID: 119509858}
-  _winConditionMode: 0
-  _dotSpeed: 3
+  _winConditionMode: 1
+  _dotSpeed: 5
   _goalRangeMinWidth: 0.5
   _goalRangeMaxWidth: 2
   _goalRangeMargins: 0.5
@@ -683,7 +683,7 @@ MonoBehaviour:
     thickness: 1
   geometry: 0
   joins: 1
-  closed: 1
+  closed: 0
   thickness: 0.125
   thicknessSpace: 0
 --- !u!23 &1148325664
