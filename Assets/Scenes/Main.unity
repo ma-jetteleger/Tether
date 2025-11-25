@@ -620,21 +620,21 @@ MonoBehaviour:
   _leftDot: {fileID: 501419690}
   _rightDot: {fileID: 119509858}
   _winConditionMode: 1
-  _dotSpeed: 5
+  _dotSpeed: 4
   _goalRangeMinWidth: 1
-  _goalRangeMaxWidth: 2.5
-  _goalRangeMargins: 0.5
-  _leftAndRightMargins: 0.5
+  _goalRangeMaxWidth: 3
+  _goalRangeMargins: 1
+  _leftAndRightMargins: 1
   _pathControlPoints: 7
   _minControlPointSpacing: 0.5
-  _pathXAmplitude: 0.5
+  _pathXAmplitude: 1
   _pathYAmplitude: 2
-  _samplesPerSegment: 24
+  _samplesPerSegment: 12
   _seed: 0
   _minSpeedMultiplier: 0.25
   _slowdownRate: 2
   _recoveryRate: 4
-  _holdTimeThreshold: 0.25
+  _holdTimeThreshold: 0.1875
 --- !u!1 &1148325662
 GameObject:
   m_ObjectHideFlags: 0
