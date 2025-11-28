@@ -132,6 +132,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 119509861}
+  - component: {fileID: 119509862}
   - component: {fileID: 119509858}
   - component: {fileID: 119509860}
   - component: {fileID: 119509859}
@@ -255,6 +256,24 @@ Transform:
   m_Father: {fileID: 977472775}
   m_RootOrder: -1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &119509862
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 119509857}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e19d078350e78344bb91ad9309e55663, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _side: 1
+  _dotSpeed: 4
+  _minSpeedMultiplier: 0.25
+  _slowdownRate: 2
+  _recoveryRate: 4
+  _holdTimeThreshold: 0.25
 --- !u!1 &501419689
 GameObject:
   m_ObjectHideFlags: 0
@@ -264,6 +283,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 501419693}
+  - component: {fileID: 501419694}
   - component: {fileID: 501419690}
   - component: {fileID: 501419692}
   - component: {fileID: 501419691}
@@ -387,6 +407,24 @@ Transform:
   m_Father: {fileID: 977472775}
   m_RootOrder: -1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &501419694
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 501419689}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e19d078350e78344bb91ad9309e55663, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _side: 0
+  _dotSpeed: 4
+  _minSpeedMultiplier: 0.25
+  _slowdownRate: 2
+  _recoveryRate: 4
+  _holdTimeThreshold: 0.25
 --- !u!1 &519420028
 GameObject:
   m_ObjectHideFlags: 0
@@ -617,10 +655,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _line: {fileID: 977472773}
   _goalRange: {fileID: 1148325663}
-  _leftDot: {fileID: 501419690}
-  _rightDot: {fileID: 119509858}
+  _leftDot: {fileID: 0}
+  _rightDot: {fileID: 0}
   _winConditionMode: 1
-  _dotSpeed: 4
   _goalRangeMinWidth: 1
   _goalRangeMaxWidth: 3
   _goalRangeMargins: 1
@@ -631,10 +668,6 @@ MonoBehaviour:
   _pathYAmplitude: 2
   _samplesPerSegment: 12
   _seed: 0
-  _minSpeedMultiplier: 0.25
-  _slowdownRate: 2
-  _recoveryRate: 4
-  _holdTimeThreshold: 0.1875
 --- !u!1 &1148325662
 GameObject:
   m_ObjectHideFlags: 0
