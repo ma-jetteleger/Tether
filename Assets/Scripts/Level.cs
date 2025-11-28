@@ -66,7 +66,7 @@ public class Level : MonoBehaviour
 	private void Start()
 	{
 		_rng = _seed == 0 ? new System.Random() : new System.Random(_seed);
-		
+
 		_pathControlPoints = Mathf.Max(2, _pathControlPoints);
 		_samplesPerSegment = Mathf.Max(4, _samplesPerSegment);
 
@@ -96,7 +96,26 @@ public class Level : MonoBehaviour
 			{
 				Active = false;
 
-				CheckWinCondition_MeetMode();
+				var meetDistance = Mathf.Clamp01((_leftDistance + _rightDistance) * 0.5f) * (PathLength == 0f ? 0f : 1f);
+
+				meetDistance = (_leftDistance + _rightDistance) * 0.5f;
+
+				var success = meetDistance >= _goalStartDistance && meetDistance <= _goalEndDistance;
+
+				if (success)
+				{
+					_leftDot.Disc.Color = _goalRange.Color;
+					_rightDot.Disc.Color = _goalRange.Color;
+
+					Invoke(nameof(GenerateNewLevel), 1f);
+				}
+				else
+				{
+					_leftDot.Disc.Color = Color.red;
+					_rightDot.Disc.Color = Color.red;
+
+					Invoke(nameof(ResetLevel), 1f);
+				}
 			}
 		}
 		else
@@ -137,49 +156,26 @@ public class Level : MonoBehaviour
 		}
 	}
 
-	// --- Meet-mode check (old behavior, but in distance-space) ---
-	private void CheckWinCondition_MeetMode()
-	{
-		var meetDistance = Mathf.Clamp01((_leftDistance + _rightDistance) * 0.5f) * (PathLength == 0f ? 0f : 1f);
-
-		meetDistance = (_leftDistance + _rightDistance) * 0.5f;
-
-		var success = meetDistance >= _goalStartDistance && meetDistance <= _goalEndDistance;
-
-		if (success)
-		{
-			_leftDot.Disc.Color = _goalRange.Color;
-			_rightDot.Disc.Color = _goalRange.Color;
-
-			Invoke(nameof(GenerateNewLevel), 1f);
-		}
-		else
-		{
-			_leftDot.Disc.Color = Color.red;
-			_rightDot.Disc.Color = Color.red;
-
-			Invoke(nameof(ResetLevel), 1f);
-		}
-	}
-
-	// --- goal checks ---
-	public bool IsDistanceInsideGoal(float distance)
-	{
-		return distance >= _goalStartDistance && distance <= _goalEndDistance;
-	}
-
-	// ---------------------------
-	// Generation: control points, sampling, distances, goal
-	// ---------------------------
 	private void GenerateNewLevel()
 	{
-		Camera cam = Camera.main;
-		float camHalfHeight = cam.orthographicSize;
-		float camHalfWidth = cam.aspect * camHalfHeight;
+		var cam = Camera.main;
 
-		float leftX = cam.transform.position.x - camHalfWidth + _leftAndRightMargins;
-		float rightX = cam.transform.position.x + camHalfWidth - _leftAndRightMargins;
+		var camHalfHeight = cam.orthographicSize;
+		var camHalfWidth = cam.aspect * camHalfHeight;
 
+		var leftX = cam.transform.position.x - camHalfWidth + _leftAndRightMargins;
+		var rightX = cam.transform.position.x + camHalfWidth - _leftAndRightMargins;
+
+		GeneratePath(leftX, rightX);
+		GenerateGoal(leftX, rightX);
+		
+		ResetDots();
+
+		Active = true;
+	}
+
+	private void GeneratePath(float leftX, float rightX)
+	{
 		// Build base linear control points between left and right (inclusive)
 		int totalPoints = Mathf.Max(2, _pathControlPoints); // must be at least 2
 		List<Vector3> basePoints = new List<Vector3>(totalPoints);
@@ -258,7 +254,10 @@ public class Level : MonoBehaviour
 
 		// set the _line polyline visual (Shapes expects world points in your use)
 		_line.SetPoints(_sampledPoints.ToArray());
+	}
 
+	private void GenerateGoal(float leftX, float rightX)
+	{
 		// Choose a goal center distance (ensuring margins on screen X are respected)
 		float rangeWidth = Mathf.Clamp(UnityEngine.Random.Range(_goalRangeMinWidth, _goalRangeMaxWidth), 0.0001f, Mathf.Max(0.0001f, PathLength));
 		float halfRange = Mathf.Min(rangeWidth * 0.5f, PathLength * 0.5f);
@@ -269,7 +268,7 @@ public class Level : MonoBehaviour
 
 		float minAllowedDist = 0f;
 		float maxAllowedDist = PathLength;
-		for (int i = 0; i < N; i++)
+		for (int i = 0; i < _sampledPoints.Count; i++)
 		{
 			if (_sampledPoints[i].x >= leftEdgeX)
 			{
@@ -277,7 +276,7 @@ public class Level : MonoBehaviour
 				break;
 			}
 		}
-		for (int i = N - 1; i >= 0; i--)
+		for (int i = _sampledPoints.Count - 1; i >= 0; i--)
 		{
 			if (_sampledPoints[i].x <= rightEdgeX)
 			{
@@ -333,12 +332,6 @@ public class Level : MonoBehaviour
 
 		// Assign to Shapes polyline
 		_goalRange.SetPoints(goalPoints.ToArray());
-
-
-		// Reset dots at start & end
-		ResetDots();
-
-		Active = true;
 	}
 
 	// Evaluate centripetal Catmull-Rom segment (p0..p3) at local t in [0,1]
@@ -380,6 +373,11 @@ public class Level : MonoBehaviour
 
 		Vector3 C = ((t2 - tt) / denomC) * B1 + ((tt - t1) / denomC) * B2;
 		return C;
+	}
+
+	public bool IsDistanceInsideGoal(float distance)
+	{
+		return distance >= _goalStartDistance && distance <= _goalEndDistance;
 	}
 
 	public Vector3 GetPositionAtDistance(float distance)
