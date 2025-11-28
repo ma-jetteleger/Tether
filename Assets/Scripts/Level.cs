@@ -35,7 +35,18 @@ public class Level : MonoBehaviour
 	public bool Active { get; set; }
 	public float PathLength { get; set; }
 
-	public WinConditionMode WinCondition => _winConditionMode;
+	public WinConditionMode WinCondition
+	{
+		get
+		{
+			return _winConditionMode;
+		}
+		set
+		{
+			_winConditionMode = value;
+		}
+	}
+
 	public Polyline GoalRange => _goalRange;
 
 	private float _leftDistance => _leftDot.DistanceOnPath;

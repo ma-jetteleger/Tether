@@ -2,6 +2,7 @@ using Shapes;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using static Level;
 
 public class Dot : MonoBehaviour
@@ -115,7 +116,14 @@ public class Dot : MonoBehaviour
 				var isLeftSide = worldPos.x < Camera.main.transform.position.x;
 				var validTouchForSide = isLeftSide && _side == Side.Left|| !isLeftSide && _side == Side.Right;
 
-				if(!validTouchForSide)
+				var tappedOnUi = IsPointerOverUIObject();
+
+				if (tappedOnUi)
+				{
+					continue;
+				}
+
+				if (!validTouchForSide)
 				{
 					continue;
 				}
@@ -179,7 +187,9 @@ public class Dot : MonoBehaviour
 			var isLeftSide = worldPosition.x < Camera.main.transform.position.x;
 			var validClickForSide = isLeftSide && _side == Side.Left || !isLeftSide && _side == Side.Right;
 
-			if (validClickForSide)
+			var mouseOnUi = IsPointerOverUIObject();
+
+			if (!mouseOnUi && validClickForSide)
 			{
 				_mouseActive = true;
 				_mouseStart = Time.time;
@@ -270,5 +280,19 @@ public class Dot : MonoBehaviour
 				_holding = true;
 			}
 		}
+	}
+
+	private bool IsPointerOverUIObject()
+	{
+		var eventDataCurrentPosition = new PointerEventData(EventSystem.current)
+		{
+			position = new Vector2(Input.mousePosition.x, Input.mousePosition.y)
+		};
+
+		var results = new List<RaycastResult>();
+
+		EventSystem.current.RaycastAll(eventDataCurrentPosition, results);
+
+		return results.Count > 0;
 	}
 }
