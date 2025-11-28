@@ -23,7 +23,10 @@ public class Dot : MonoBehaviour
 	public Disc Disc { get; set; }
 
 	public float DistanceOnPath { get; set; }
-	public bool Confirmed { get; set; }
+	public bool GoalConfirmed { get; set; }
+
+	private HashSet<GameObject> _confirmedObstacles = new HashSet<GameObject>();
+	private GameObject _currentObstacle = null;
 
 	private Level _level;
 	
@@ -61,7 +64,10 @@ public class Dot : MonoBehaviour
 		_mouseActive = false;
 		_touchId = null;
 
-		Confirmed = false;
+		GoalConfirmed = false;
+
+		_confirmedObstacles.Clear();
+		_currentObstacle = null;
 	}
 
 	private void Update()
@@ -102,6 +108,8 @@ public class Dot : MonoBehaviour
 			var position = _level.GetPositionAtDistance(DistanceOnPath);
 
 			transform.position = position;
+
+			CheckObstacleStatus();
 		}
 	}
 
@@ -159,13 +167,9 @@ public class Dot : MonoBehaviour
 
 						if (duration < _holdTimeThreshold)
 						{
-							if (_launched && _level.WinCondition == WinConditionMode.ConfirmPressInsideRange)
+							if (_launched)
 							{
-								if (_level.IsDistanceInsideGoal(DistanceOnPath))
-								{
-									Confirmed = true;
-									Disc.Color = _level.GoalRange.Color;
-								}
+								HandleConfirmation();
 							}
 						}
 
@@ -225,14 +229,9 @@ public class Dot : MonoBehaviour
 
 				if (duration < _holdTimeThreshold)
 				{
-					if (_launched && _level.WinCondition == WinConditionMode.ConfirmPressInsideRange)
+					if (_launched)
 					{
-						if (_level.IsDistanceInsideGoal(DistanceOnPath))
-						{
-							Confirmed = true;
-
-							Disc.Color = _level.GoalRange.Color;
-						}
+						HandleConfirmation();
 					}
 				}
 
@@ -262,14 +261,9 @@ public class Dot : MonoBehaviour
 
 			if (duration < _holdTimeThreshold)
 			{
-				if (_launched && _level.WinCondition == WinConditionMode.ConfirmPressInsideRange)
+				if (_launched)
 				{
-					if (_level.IsDistanceInsideGoal(DistanceOnPath))
-					{
-						Confirmed = true;
-
-						Disc.Color = _level.GoalRange.Color;
-					}
+					HandleConfirmation();
 				}
 			}
 		}
@@ -278,6 +272,58 @@ public class Dot : MonoBehaviour
 			if (_launched && _keyActive && Time.time - _holdStart >= _holdTimeThreshold)
 			{
 				_holding = true;
+			}
+		}
+	}
+
+	private void CheckObstacleStatus()
+	{
+		var obstacle = _level.IsDistanceInsideObstacle(DistanceOnPath);
+
+		if (obstacle != null && obstacle != _currentObstacle)
+		{
+			_currentObstacle = obstacle;
+		}
+
+		else if (obstacle == null && _currentObstacle != null)
+		{
+			if (!_confirmedObstacles.Contains(_currentObstacle))
+			{
+				Disc.Color = Color.red;
+
+				_level.Fail();
+
+				return;
+			}
+
+			Disc.Color = Color.white;
+
+			_currentObstacle = null;
+		}
+	}
+
+	private void HandleConfirmation()
+	{
+		// Check if inside an obstacle
+		var obstacle = _level.IsDistanceInsideObstacle(DistanceOnPath);
+		if (obstacle != null)
+		{
+			// Confirm this obstacle
+			if (!_confirmedObstacles.Contains(obstacle))
+			{
+				_confirmedObstacles.Add(obstacle);
+
+				Disc.Color = obstacle.GetComponent<Polyline>().Color;
+			}
+		}
+
+		// Check goal confirmation (only in ConfirmPress mode)
+		if (_level.WinCondition == WinConditionMode.ConfirmPressInsideRange)
+		{
+			if (_level.IsDistanceInsideGoal(DistanceOnPath))
+			{
+				GoalConfirmed = true;
+				Disc.Color = _level.GoalRange.Color;
 			}
 		}
 	}
