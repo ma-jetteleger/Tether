@@ -11,10 +11,19 @@ public class Level : MonoBehaviour
 		ConfirmPressInsideRange
 	}
 
+	public enum RangeType
+	{
+		Obstacle,
+		Boost,
+		Break
+	}
+
 	[Header("References")]
 	[SerializeField] private Polyline _line;
 	[SerializeField] private Polyline _goalRange;
 	[SerializeField] private Polyline _obstacleRangeTemplate;
+	[SerializeField] private Polyline _boostRangeTemplate;
+	[SerializeField] private Polyline _breakRangeTemplate;
 	[SerializeField] private Dot _leftDot;
 	[SerializeField] private Dot _rightDot;
 
@@ -22,7 +31,9 @@ public class Level : MonoBehaviour
 	[SerializeField] private bool _straightLine = true;
 	[SerializeField] private WinConditionMode _winConditionMode = WinConditionMode.MeetInsideRange;
 	[SerializeField] private int _obstaclesPerSide = 0;
-	
+	[SerializeField] private int _boostsPerSide = 0;
+	[SerializeField] private int _breaksPerSide = 0;
+
 	[Header("Level Generation Parameters")]
 	[SerializeField] private float _leftAndRightMargins = 0.5f;
 	[SerializeField] private float _goalRangeMinWidth = 0.5f;
@@ -30,9 +41,13 @@ public class Level : MonoBehaviour
 	[SerializeField] private float _goalRangeMargins = 0.5f;
 	[SerializeField] private float _obstacleRangeMinWidth = 0.3f;
 	[SerializeField] private float _obstacleRangeMaxWidth = 1.2f;
+	[SerializeField] private float _boostRangeMinWidth = 0.3f;
+	[SerializeField] private float _boostRangeMaxWidth = 1.2f;
+	[SerializeField] private float _breakRangeMinWidth = 0.3f;
+	[SerializeField] private float _breakRangeMaxWidth = 1.2f;
 	[SerializeField] private float _obstacleToGoalMargin = 0.4f;
 	[SerializeField] private float _obstacleToObstacleMargin = 0.25f;
-	[SerializeField] private int _maxObstacleGenerationTries = 30;
+	[SerializeField] private int _maxRangesGenerationTries = 30;
 
 	[Header("Spline / Curviness (Centripetal Catmull-Rom)")]
 	[SerializeField, Tooltip("Total number of control points including start and end. Must be >= 2.")] private int _pathControlPoints = 7;
@@ -69,7 +84,7 @@ public class Level : MonoBehaviour
 		}
 	}
 
-	public int ObstaclesPerSide 
+	public int ObstaclesPerSide
 	{
 		get
 		{
@@ -81,21 +96,50 @@ public class Level : MonoBehaviour
 		}
 	}
 
+	public int BoostsPerSide
+	{
+		get
+		{
+			return _boostsPerSide;
+		}
+		set
+		{
+			_boostsPerSide = value;
+		}
+	}
+
+	public int BreakPerSide
+	{
+		get
+		{
+			return _breaksPerSide;
+		}
+		set
+		{
+			_breaksPerSide = value;
+		}
+	}
+
 	public Polyline GoalRange => _goalRange;
 
 	private float _leftDistance => _leftDot.DistanceOnPath;
 	private float _rightDistance => _rightDot.DistanceOnPath;
 
+	private float _leftX;
+	private float _rightX;
+
 	// spline / sampling data
-	private List<Vector3> _controlPoints;      // padded list used for Catmull-Rom (we'll build with extra endpoints)
-	private List<Vector3> _sampledPoints;      // sampled positions along spline (visual + distance mapping)
-	private float[] _cumulativeLengths;        // cumulative distance per sampled point
+	private List<Vector3> _controlPoints;
+	private List<Vector3> _sampledPoints;
+	private float[] _cumulativeLengths;
 
 	// goal in distance-space
 	private float _goalStartDistance;
 	private float _goalEndDistance;
 
-	private Dictionary<GameObject, (float obstacleStartDistance, float obstacleEndDistance)> _obstacleRanges;
+	private Dictionary<GameObject, (float startDistance, float endDistance)> _obstacleRanges;
+	private Dictionary<GameObject, (float startDistance, float endDistance)> _boostRanges;
+	private Dictionary<GameObject, (float startDistance, float endDistance)> _breakRanges;
 
 	private System.Random _rng;
 
@@ -110,6 +154,12 @@ public class Level : MonoBehaviour
 		_rightDot.Initialize(this);
 
 		_obstacleRangeTemplate.gameObject.SetActive(false);
+		if (_boostRangeTemplate != null) _boostRangeTemplate.gameObject.SetActive(false);
+		if (_breakRangeTemplate != null) _breakRangeTemplate.gameObject.SetActive(false);
+
+		_obstacleRanges = new Dictionary<GameObject, (float startDistance, float endDistance)>();
+		_boostRanges = new Dictionary<GameObject, (float startDistance, float endDistance)>();
+		_breakRanges = new Dictionary<GameObject, (float startDistance, float endDistance)>();
 
 		GenerateNewLevel();
 	}
@@ -124,6 +174,13 @@ public class Level : MonoBehaviour
 		if (Input.GetKeyDown(KeyCode.Return))
 		{
 			GenerateNewLevel();
+
+			return;
+		}
+
+		if(Input.GetKeyDown(KeyCode.Backspace))
+		{
+			GenerateGoal(_leftX, _rightX);
 
 			return;
 		}
@@ -197,13 +254,13 @@ public class Level : MonoBehaviour
 		var camHalfHeight = cam.orthographicSize;
 		var camHalfWidth = cam.aspect * camHalfHeight;
 
-		var leftX = cam.transform.position.x - camHalfWidth + _leftAndRightMargins;
-		var rightX = cam.transform.position.x + camHalfWidth - _leftAndRightMargins;
+		_leftX = cam.transform.position.x - camHalfWidth + _leftAndRightMargins;
+		_rightX = cam.transform.position.x + camHalfWidth - _leftAndRightMargins;
 
-		GeneratePath(leftX, rightX);
-		GenerateGoal(leftX, rightX);
+		GeneratePath(_leftX, _rightX);
+		GenerateGoal(_leftX, _rightX);
 
-		GenerateObstacles(leftX, rightX);
+		GenerateAllRanges(_leftX, _rightX);
 
 		ResetDots();
 
@@ -213,7 +270,7 @@ public class Level : MonoBehaviour
 	private void GeneratePath(float leftX, float rightX)
 	{
 		// Build base linear control points between left and right (inclusive)
-		int totalPoints = _straightLine ? 2 : Mathf.Max(2, _pathControlPoints); // must be at least 2
+		int totalPoints = _straightLine ? 2 : Mathf.Max(2, _pathControlPoints);
 		List<Vector3> basePoints = new List<Vector3>(totalPoints);
 
 		for (int i = 0; i < totalPoints; i++)
@@ -226,13 +283,13 @@ public class Level : MonoBehaviour
 			float jitterX = (float)(_rng.NextDouble() * 2.0 - 1.0) * _pathXAmplitude;
 			float jitterY = (float)(_rng.NextDouble() * 2.0 - 1.0) * _pathYAmplitude;
 
-			// ensure endpoints stay exactly at leftX/rightX horizontally (no jitter on endpoint X)
+			// ensure endpoints stay exactly at leftX/rightX horizontally
 			if (i == 0) jitterX = 0f;
 			if (i == totalPoints - 1) jitterX = 0f;
 
 			Vector3 cp = new Vector3(x + jitterX, y + jitterY, 0f);
 
-			// --- Enforce minimum spacing between consecutive control points ---
+			// Enforce minimum spacing between consecutive control points
 			if (basePoints.Count > 0)
 			{
 				Vector3 prev = basePoints[basePoints.Count - 1];
@@ -240,34 +297,29 @@ public class Level : MonoBehaviour
 
 				if (dist < _minControlPointSpacing)
 				{
-					// Push cp away from prev along their direction
 					Vector3 dir = (cp - prev).normalized;
 
-					// If they are exactly overlapping (rare), choose a random direction
 					if (dir == Vector3.zero)
 						dir = UnityEngine.Random.insideUnitSphere.normalized;
 
 					cp = prev + dir * _minControlPointSpacing;
 				}
 			}
-			// -----------------------------------------------------------------
 
 			basePoints.Add(cp);
-
 		}
 
-		// Build padded control list for Catmull-Rom (we'll duplicate endpoints at ends)
+		// Build padded control list for Catmull-Rom
 		_controlPoints = new List<Vector3>(basePoints.Count + 2);
-		_controlPoints.Add(basePoints[0]);            // p0 duplicate
-		_controlPoints.AddRange(basePoints);         // p1..pn
-		_controlPoints.Add(basePoints[basePoints.Count - 1]); // pN+1 duplicate
+		_controlPoints.Add(basePoints[0]);
+		_controlPoints.AddRange(basePoints);
+		_controlPoints.Add(basePoints[basePoints.Count - 1]);
 
-		// Sample the centripetal Catmull-Rom spline into _sampledPoints
+		// Sample the centripetal Catmull-Rom spline
 		_sampledPoints = new List<Vector3>();
-		int segmentCount = _controlPoints.Count - 3; // count of segments
+		int segmentCount = _controlPoints.Count - 3;
 		for (int seg = 0; seg < segmentCount; seg++)
 		{
-			// For each segment evaluate local t in [0,1]
 			for (int s = 0; s < _samplesPerSegment; s++)
 			{
 				float localT = (float)s / _samplesPerSegment;
@@ -275,7 +327,6 @@ public class Level : MonoBehaviour
 				_sampledPoints.Add(p);
 			}
 		}
-		// add final control point to close samples
 		_sampledPoints.Add(_controlPoints[_controlPoints.Count - 2]);
 
 		// compute cumulative lengths
@@ -288,17 +339,14 @@ public class Level : MonoBehaviour
 		}
 		PathLength = _cumulativeLengths[N - 1];
 
-		// set the _line polyline visual (Shapes expects world points in your use)
 		_line.SetPoints(_sampledPoints.ToArray());
 	}
 
 	private void GenerateGoal(float leftX, float rightX)
 	{
-		// Choose a goal center distance (ensuring margins on screen X are respected)
 		var rangeWidth = Mathf.Clamp(UnityEngine.Random.Range(_goalRangeMinWidth, _goalRangeMaxWidth), 0.0001f, Mathf.Max(0.0001f, PathLength));
 		var halfRange = Mathf.Min(rangeWidth * 0.5f, PathLength * 0.5f);
 
-		// Determine allowed min/max distances on the path that respect world X margins (convert world X margins into allowed sample indices)
 		var leftEdgeX = leftX + _goalRangeMargins;
 		var rightEdgeX = rightX - _goalRangeMargins;
 
@@ -310,7 +358,6 @@ public class Level : MonoBehaviour
 			if (_sampledPoints[i].x >= leftEdgeX)
 			{
 				minAllowedDist = _cumulativeLengths[i];
-
 				break;
 			}
 		}
@@ -319,12 +366,10 @@ public class Level : MonoBehaviour
 			if (_sampledPoints[i].x <= rightEdgeX)
 			{
 				maxAllowedDist = _cumulativeLengths[i];
-
 				break;
 			}
 		}
 
-		// Choose a random center distance within allowed range while ensuring the range fits
 		var minCenter = minAllowedDist + halfRange;
 		var maxCenter = maxAllowedDist - halfRange;
 
@@ -335,74 +380,39 @@ public class Level : MonoBehaviour
 		_goalStartDistance = Mathf.Clamp(centerDist - halfRange, 0f, PathLength);
 		_goalEndDistance = Mathf.Clamp(centerDist + halfRange, 0f, PathLength);
 
-		// Set goal polyline visuals: from start to end positions on spline
-		// Build goal-range polyline following the exact curve
 		var goalPoints = new List<Vector3>();
 
-		// --- helper: find closest sample index for a given distance
 		int FindIndex(float dist)
 		{
 			var idx = Array.BinarySearch(_cumulativeLengths, dist);
-
-			if (idx >= 0)
-			{
-				return idx;
-			}
-
+			if (idx >= 0) return idx;
 			var insert = ~idx;
-
 			return Mathf.Clamp(insert - 1, 0, _cumulativeLengths.Length - 1);
 		}
 
 		var startIdx = FindIndex(_goalStartDistance);
 		var endIdx = FindIndex(_goalEndDistance);
 
-		// Interpolate the exact start position
 		goalPoints.Add(GetPositionAtDistance(_goalStartDistance));
 
-		// Add all intermediate sampled points
 		for (var i = startIdx + 1; i <= endIdx; i++)
 		{
 			goalPoints.Add(_sampledPoints[i]);
 		}
 
-		// Interpolate the exact end position
 		goalPoints.Add(GetPositionAtDistance(_goalEndDistance));
 
-		// Assign to Shapes polyline
 		_goalRange.SetPoints(goalPoints.ToArray());
 	}
 
-	private void GenerateObstacles(float leftX, float rightX)
+	private void GenerateAllRanges(float leftX, float rightX)
 	{
-		if (_obstacleRanges == null)
-		{
-			_obstacleRanges = new Dictionary<GameObject, (float obstacleStartDistance, float obstacleEndDistance)>();
-		}
-		else
-		{
-			foreach (var obstacleRange in _obstacleRanges)
-			{
-				Destroy(obstacleRange.Key);
-			}
+		// Clear all existing ranges
+		ClearRanges(_obstacleRanges);
+		ClearRanges(_boostRanges);
+		ClearRanges(_breakRanges);
 
-			_obstacleRanges.Clear();
-		}
-
-		int FindIndex(float dist)
-		{
-			var idx = Array.BinarySearch(_cumulativeLengths, dist);
-
-			if (idx >= 0)
-			{
-				return idx;
-			}
-
-			var insert = ~idx;
-
-			return Mathf.Clamp(insert - 1, 0, _cumulativeLengths.Length - 1);
-		}
-
+		// Calculate boundary distances
 		float? FindDistanceAtXThresholdLeft(float targetX)
 		{
 			for (var i = 0; i < _sampledPoints.Count; i++)
@@ -412,7 +422,6 @@ public class Level : MonoBehaviour
 					return _cumulativeLengths[i];
 				}
 			}
-
 			return null;
 		}
 
@@ -425,94 +434,7 @@ public class Level : MonoBehaviour
 					return _cumulativeLengths[i];
 				}
 			}
-
 			return null;
-		}
-
-		void GenerateRandomObstaclesInRegion(float regionStart, float regionEnd)
-		{
-			var regionLength = regionEnd - regionStart;
-
-			if (regionLength < _obstacleRangeMinWidth)
-			{
-				return;
-			}
-
-			var placedObstacles = new List<(float a, float b)>();
-
-			for (var n = 0; n < _obstaclesPerSide; n++)
-			{
-				var width = UnityEngine.Random.Range(_obstacleRangeMinWidth, _obstacleRangeMaxWidth);
-				width = Mathf.Min(width, regionLength);
-
-				var half = width * 0.5f;
-
-				var minCenter = regionStart + half;
-				var maxCenter = regionEnd - half;
-
-				if (maxCenter <= minCenter)
-				{
-					break;
-				}
-
-				var validPlacement = false;
-
-				for (int attempt = 0; attempt < _maxObstacleGenerationTries; attempt++)
-				{
-					var centerDist = Mathf.Lerp(minCenter, maxCenter, UnityEngine.Random.value);
-					var startDistance = centerDist - half;
-					var endDistance = centerDist + half;
-
-					var overlaps = false;
-
-					foreach (var (start, end) in placedObstacles)
-					{
-						if (!(endDistance + _obstacleToObstacleMargin < start || startDistance - _obstacleToObstacleMargin > end))
-						{
-							overlaps = true;
-
-							break;
-						}
-					}
-
-					if (overlaps)
-					{
-						continue;
-					}
-
-					placedObstacles.Add((startDistance, endDistance));
-
-					var points = new List<Vector3>();
-
-					var startIndex = FindIndex(startDistance);
-					var endIndex = FindIndex(endDistance);
-
-					points.Add(GetPositionAtDistance(startDistance));
-
-					for (var i = startIndex + 1; i <= endIndex; i++)
-					{
-						points.Add(_sampledPoints[i]);
-					}
-
-					points.Add(GetPositionAtDistance(endDistance));
-
-					var newObstacleRange = Instantiate(_obstacleRangeTemplate, transform);
-
-					newObstacleRange.SetPoints(points.ToArray());
-					newObstacleRange.gameObject.SetActive(true);
-
-					_obstacleRanges.Add(newObstacleRange.gameObject, (startDistance, endDistance));
-
-					validPlacement = true;
-
-					break;
-				}
-
-				if (!validPlacement)
-				{
-					continue;
-				}
-			}
 		}
 
 		var leftLimitDist = FindDistanceAtXThresholdLeft(leftX + _goalRangeMargins) ?? 0f;
@@ -524,12 +446,169 @@ public class Level : MonoBehaviour
 		var rightRegionStart = Mathf.Min(rightLimitDist, _goalEndDistance + _obstacleToGoalMargin);
 		var rightRegionEnd = rightLimitDist;
 
-		GenerateRandomObstaclesInRegion(leftRegionStart, leftRegionEnd);
-		GenerateRandomObstaclesInRegion(rightRegionStart, rightRegionEnd);
+		// Generate all range types
+		GenerateRangesOfType(RangeType.Obstacle, leftRegionStart, leftRegionEnd, _obstaclesPerSide);
+		GenerateRangesOfType(RangeType.Obstacle, rightRegionStart, rightRegionEnd, _obstaclesPerSide);
+
+		GenerateRangesOfType(RangeType.Boost, leftRegionStart, leftRegionEnd, _boostsPerSide);
+		GenerateRangesOfType(RangeType.Boost, rightRegionStart, rightRegionEnd, _boostsPerSide);
+
+		GenerateRangesOfType(RangeType.Break, leftRegionStart, leftRegionEnd, _breaksPerSide);
+		GenerateRangesOfType(RangeType.Break, rightRegionStart, rightRegionEnd, _breaksPerSide);
 	}
 
-	// Evaluate centripetal Catmull-Rom segment (p0..p3) at local t in [0,1]
-	// This implementation follows the centripetal parameterization (alpha = 0.5)
+	private void ClearRanges(Dictionary<GameObject, (float startDistance, float endDistance)> ranges)
+	{
+		foreach (var range in ranges)
+		{
+			Destroy(range.Key);
+		}
+		ranges.Clear();
+	}
+
+	private void GenerateRangesOfType(RangeType rangeType, float regionStart, float regionEnd, int count)
+	{
+		// Get parameters based on range type
+		float minWidth, maxWidth;
+		Polyline template;
+		Dictionary<GameObject, (float startDistance, float endDistance)> targetDictionary;
+
+		switch (rangeType)
+		{
+			case RangeType.Obstacle:
+				minWidth = _obstacleRangeMinWidth;
+				maxWidth = _obstacleRangeMaxWidth;
+				template = _obstacleRangeTemplate;
+				targetDictionary = _obstacleRanges;
+				break;
+			case RangeType.Boost:
+				minWidth = _boostRangeMinWidth;
+				maxWidth = _boostRangeMaxWidth;
+				template = _boostRangeTemplate;
+				targetDictionary = _boostRanges;
+				break;
+			case RangeType.Break:
+				minWidth = _breakRangeMinWidth;
+				maxWidth = _breakRangeMaxWidth;
+				template = _breakRangeTemplate;
+				targetDictionary = _breakRanges;
+				break;
+			default:
+				return;
+		}
+
+		if (template == null)
+		{
+			Debug.LogWarning($"Template for {rangeType} is null. Skipping generation.");
+			return;
+		}
+
+		var regionLength = regionEnd - regionStart;
+
+		if (regionLength < minWidth)
+		{
+			return;
+		}
+
+		// Get all existing placed ranges in this region (from all types)
+		var placedRanges = new List<(float a, float b)>();
+		CollectPlacedRanges(_obstacleRanges, regionStart, regionEnd, placedRanges);
+		CollectPlacedRanges(_boostRanges, regionStart, regionEnd, placedRanges);
+		CollectPlacedRanges(_breakRanges, regionStart, regionEnd, placedRanges);
+
+		int FindIndex(float dist)
+		{
+			var idx = Array.BinarySearch(_cumulativeLengths, dist);
+			if (idx >= 0) return idx;
+			var insert = ~idx;
+			return Mathf.Clamp(insert - 1, 0, _cumulativeLengths.Length - 1);
+		}
+
+		for (var n = 0; n < count; n++)
+		{
+			var width = UnityEngine.Random.Range(minWidth, maxWidth);
+			width = Mathf.Min(width, regionLength);
+
+			var half = width * 0.5f;
+
+			var minCenter = regionStart + half;
+			var maxCenter = regionEnd - half;
+
+			if (maxCenter <= minCenter)
+			{
+				break;
+			}
+
+			var validPlacement = false;
+
+			for (int attempt = 0; attempt < _maxRangesGenerationTries; attempt++)
+			{
+				var centerDist = Mathf.Lerp(minCenter, maxCenter, UnityEngine.Random.value);
+				var startDistance = centerDist - half;
+				var endDistance = centerDist + half;
+
+				var overlaps = false;
+
+				foreach (var (start, end) in placedRanges)
+				{
+					if (!(endDistance + _obstacleToObstacleMargin < start || startDistance - _obstacleToObstacleMargin > end))
+					{
+						overlaps = true;
+						break;
+					}
+				}
+
+				if (overlaps)
+				{
+					continue;
+				}
+
+				placedRanges.Add((startDistance, endDistance));
+
+				var points = new List<Vector3>();
+
+				var startIndex = FindIndex(startDistance);
+				var endIndex = FindIndex(endDistance);
+
+				points.Add(GetPositionAtDistance(startDistance));
+
+				for (var i = startIndex + 1; i <= endIndex; i++)
+				{
+					points.Add(_sampledPoints[i]);
+				}
+
+				points.Add(GetPositionAtDistance(endDistance));
+
+				var newRange = Instantiate(template, transform);
+				newRange.SetPoints(points.ToArray());
+				newRange.gameObject.SetActive(true);
+
+				targetDictionary.Add(newRange.gameObject, (startDistance, endDistance));
+
+				validPlacement = true;
+				break;
+			}
+
+			if (!validPlacement)
+			{
+				continue;
+			}
+		}
+	}
+
+	private void CollectPlacedRanges(Dictionary<GameObject, (float startDistance, float endDistance)> ranges,
+		float regionStart, float regionEnd, List<(float a, float b)> output)
+	{
+		foreach (var range in ranges.Values)
+		{
+			// Only include ranges that overlap with this region
+			if (!(range.endDistance < regionStart || range.startDistance > regionEnd))
+			{
+				output.Add((range.startDistance, range.endDistance));
+			}
+		}
+	}
+
 	private Vector3 EvaluateCentripetalSegment(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
 	{
 		float alpha = 0.5f;
@@ -538,7 +617,6 @@ public class Level : MonoBehaviour
 		float d12 = Mathf.Pow(Vector3.Distance(p1, p2), alpha);
 		float d23 = Mathf.Pow(Vector3.Distance(p2, p3), alpha);
 
-		// avoid zero distances
 		d01 = Mathf.Max(d01, 0.0001f);
 		d12 = Mathf.Max(d12, 0.0001f);
 		d23 = Mathf.Max(d23, 0.0001f);
@@ -548,7 +626,7 @@ public class Level : MonoBehaviour
 		float t2 = t1 + d12;
 		float t3 = t2 + d23;
 
-		float tt = Mathf.Lerp(t1, t2, t); // mapping local t to [t1,t2]
+		float tt = Mathf.Lerp(t1, t2, t);
 
 		Vector3 A1 = ((t1 - tt) / d01) * p0 + ((tt - t0) / d01) * p1;
 		Vector3 A2 = ((t2 - tt) / d12) * p1 + ((tt - t1) / d12) * p2;
@@ -578,13 +656,36 @@ public class Level : MonoBehaviour
 	{
 		foreach (var obstacle in _obstacleRanges)
 		{
-			if(distance >= obstacle.Value.obstacleStartDistance && distance <= obstacle.Value.obstacleEndDistance)
+			if (distance >= obstacle.Value.startDistance && distance <= obstacle.Value.endDistance)
 			{
 				return obstacle.Key;
 			}
 		}
-
 		return null;
+	}
+
+	public bool IsDistanceInsideBoost(float distance)
+	{
+		foreach (var boost in _boostRanges)
+		{
+			if (distance >= boost.Value.startDistance && distance <= boost.Value.endDistance)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public bool IsDistanceInsideBreak(float distance)
+	{
+		foreach (var breakRange in _breakRanges)
+		{
+			if (distance >= breakRange.Value.startDistance && distance <= breakRange.Value.endDistance)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public Vector3 GetPositionAtDistance(float distance)
@@ -625,14 +726,12 @@ public class Level : MonoBehaviour
 	public void Win()
 	{
 		Active = false;
-
 		Invoke(nameof(GenerateNewLevel), 1f);
 	}
 
 	public void Fail()
 	{
 		Active = false;
-
 		Invoke(nameof(ResetLevel), 1f);
 	}
 
