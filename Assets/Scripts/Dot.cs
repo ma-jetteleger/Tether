@@ -7,19 +7,13 @@ using static Level;
 
 public class Dot : MonoBehaviour
 {
-	public enum Side
-	{
-		Left,
-		Right
-	}
-
 	public enum DotMovementMode
 	{
 		TapToLaunch,    // Original mode: tap to start, hold to slow
 		HoldToMove      // New mode: hold to move forward, release to go back
 	}
 
-	[SerializeField] private Side _side = Side.Left;
+	[SerializeField] private Level.Side _side = Level.Side.Left;
 	[SerializeField] private DotMovementMode _movementMode = DotMovementMode.TapToLaunch;
 	[SerializeField] private float _dotSpeed = 3f;
 	[SerializeField] private float _minSpeedMultiplier = 0.25f;
@@ -79,7 +73,7 @@ public class Dot : MonoBehaviour
 
 	public void Reinitialize()
 	{
-		DistanceOnPath = _side == Side.Left ? 0 : _level.PathLength;
+		DistanceOnPath = _side == Level.Side.Left ? 0 : _level.PathLength;
 
 		_launched = false;
 
@@ -159,7 +153,7 @@ public class Dot : MonoBehaviour
 
 		if (_launched)
 		{
-			DistanceOnPath = _side == Side.Left
+			DistanceOnPath = _side == Level.Side.Left
 				? Mathf.Min(_level.PathLength, DistanceOnPath + delta)
 				: Mathf.Max(0f, DistanceOnPath - delta);
 
@@ -183,7 +177,7 @@ public class Dot : MonoBehaviour
 			// Moving forward (in the dot's normal direction)
 			delta = _dotSpeed * _boostBreakMultiplier * Time.deltaTime;
 
-			DistanceOnPath = _side == Side.Left
+			DistanceOnPath = _side == Level.Side.Left
 				? Mathf.Min(_level.PathLength, DistanceOnPath + delta)
 				: Mathf.Max(0f, DistanceOnPath - delta);
 		}
@@ -192,7 +186,7 @@ public class Dot : MonoBehaviour
 			// Moving backward (reverse direction, faster)
 			delta = _dotSpeed * _reverseSpeedMultiplier * _boostBreakMultiplier * Time.deltaTime;
 
-			DistanceOnPath = _side == Side.Left
+			DistanceOnPath = _side == Level.Side.Left
 				? Mathf.Max(0f, DistanceOnPath - delta)
 				: Mathf.Min(_level.PathLength, DistanceOnPath + delta);
 		}
@@ -201,7 +195,7 @@ public class Dot : MonoBehaviour
 		transform.position = position;
 
 		// Check if dot has returned to start in HoldToMove mode
-		bool atStart = _side == Side.Left ? DistanceOnPath <= 0.01f : DistanceOnPath >= _level.PathLength - 0.01f;
+		bool atStart = _side == Level.Side.Left ? DistanceOnPath <= 0.01f : DistanceOnPath >= _level.PathLength - 0.01f;
 		if (atStart)
 		{
 			ResetHiddenObstacles();
@@ -215,7 +209,7 @@ public class Dot : MonoBehaviour
 	{
 		// Check if inside a boost
 		var boost = _level.IsDistanceInsideBoost(DistanceOnPath);
-		if (boost)
+		if (boost != null)
 		{
 			_boostBreakMultiplier = _boostSpeedMultiplier;
 			return;
@@ -223,7 +217,7 @@ public class Dot : MonoBehaviour
 
 		// Check if inside a break
 		var breakRange = _level.IsDistanceInsideBreak(DistanceOnPath);
-		if (breakRange)
+		if (breakRange != null)
 		{
 			_boostBreakMultiplier = _breakSpeedMultiplier;
 			return;
@@ -242,7 +236,7 @@ public class Dot : MonoBehaviour
 				var touch = Input.GetTouch(i);
 				var worldPos = Camera.main.ScreenToWorldPoint(touch.position);
 				var isLeftSide = worldPos.x < Camera.main.transform.position.x;
-				var validTouchForSide = isLeftSide && _side == Side.Left || !isLeftSide && _side == Side.Right;
+				var validTouchForSide = isLeftSide && _side == Level.Side.Left || !isLeftSide && _side == Level.Side.Right;
 
 				var tappedOnUi = IsPointerOverUIObject();
 
@@ -322,7 +316,7 @@ public class Dot : MonoBehaviour
 		{
 			var worldPosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
 			var isLeftSide = worldPosition.x < Camera.main.transform.position.x;
-			var validClickForSide = isLeftSide && _side == Side.Left || !isLeftSide && _side == Side.Right;
+			var validClickForSide = isLeftSide && _side == Level.Side.Left || !isLeftSide && _side == Level.Side.Right;
 
 			var mouseOnUi = IsPointerOverUIObject();
 
@@ -342,7 +336,7 @@ public class Dot : MonoBehaviour
 		{
 			var worldPositon = Camera.main.ScreenToWorldPoint(Input.mousePosition);
 			var isLeftSide = worldPositon.x < Camera.main.transform.position.x;
-			var validClickForSide = isLeftSide && _side == Side.Left || !isLeftSide && _side == Side.Right;
+			var validClickForSide = isLeftSide && _side == Level.Side.Left || !isLeftSide && _side == Level.Side.Right;
 
 			if (validClickForSide && _mouseActive)
 			{
@@ -364,7 +358,7 @@ public class Dot : MonoBehaviour
 		{
 			var worldPosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
 			var isLeftSide = worldPosition.x < Camera.main.transform.position.x;
-			var validClickForSide = isLeftSide && _side == Side.Left || !isLeftSide && _side == Side.Right;
+			var validClickForSide = isLeftSide && _side == Level.Side.Left || !isLeftSide && _side == Level.Side.Right;
 
 			if (validClickForSide && _mouseActive)
 			{
@@ -391,7 +385,7 @@ public class Dot : MonoBehaviour
 			}
 		}
 
-		if (Input.GetKeyDown(KeyCode.A) && _side == Side.Left || Input.GetKeyDown(KeyCode.L) && _side == Side.Right)
+		if (Input.GetKeyDown(KeyCode.A) && _side == Level.Side.Left || Input.GetKeyDown(KeyCode.L) && _side == Level.Side.Right)
 		{
 			_keyActive = true;
 			_holdStart = Time.time;
@@ -401,7 +395,7 @@ public class Dot : MonoBehaviour
 				_launched = true;
 			}
 		}
-		if (Input.GetKeyUp(KeyCode.A) && _side == Side.Left || Input.GetKeyUp(KeyCode.L) && _side == Side.Right)
+		if (Input.GetKeyUp(KeyCode.A) && _side == Level.Side.Left || Input.GetKeyUp(KeyCode.L) && _side == Level.Side.Right)
 		{
 			var duration = Time.time - _holdStart;
 
@@ -424,7 +418,7 @@ public class Dot : MonoBehaviour
 				}
 			}
 		}
-		if (Input.GetKey(KeyCode.A) && _side == Side.Left || Input.GetKey(KeyCode.L) && _side == Side.Right)
+		if (Input.GetKey(KeyCode.A) && _side == Level.Side.Left || Input.GetKey(KeyCode.L) && _side == Level.Side.Right)
 		{
 			if (_movementMode == DotMovementMode.TapToLaunch)
 			{
@@ -497,7 +491,7 @@ public class Dot : MonoBehaviour
 	{
 		// Check if inside an obstacle
 		var obstacle = _level.IsDistanceInsideObstacle(DistanceOnPath);
-		if (obstacle != null)
+		if (obstacle != null && _level.IsObstacleOwnedBySide(obstacle, _side))
 		{
 			// Confirm this obstacle
 			if (!_confirmedObstacles.Contains(obstacle))
@@ -526,7 +520,7 @@ public class Dot : MonoBehaviour
 	{
 		// Check if inside an obstacle
 		var obstacle = _level.IsDistanceInsideObstacle(DistanceOnPath);
-		if (obstacle != null)
+		if (obstacle != null && _level.IsObstacleOwnedBySide(obstacle, _side))
 		{
 			// Confirm this obstacle
 			if (!_confirmedObstacles.Contains(obstacle))

@@ -25,7 +25,7 @@ public class SettingsPanel : MonoBehaviour
 		_winConditionToggle.isOn = _level.WinCondition == Level.WinConditionMode.ConfirmPressInsideRange;
 		_obstacleCountText.text = _level.ObstaclesPerSide.ToString();
 		_boostCountText.text = _level.BoostsPerSide.ToString();
-		_breakCountText.text = _level.BreakPerSide.ToString();
+		_breakCountText.text = _level.BreaksPerSide.ToString();
 
 		_leftInputModeToggle.isOn = _leftDot.MovementMode == Dot.DotMovementMode.HoldToMove;
 		_rightInputModeToggle.isOn = _rightDot.MovementMode == Dot.DotMovementMode.HoldToMove;
@@ -85,7 +85,7 @@ public class SettingsPanel : MonoBehaviour
 			newValue = 0;
 		}
 
-		_level.BreakPerSide = newValue;
+		_level.BreaksPerSide = newValue;
 
 		_breakCountText.text = newValue.ToString();
 	}

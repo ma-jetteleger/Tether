@@ -18,6 +18,12 @@ public class Level : MonoBehaviour
 		Break
 	}
 
+	public enum Side
+	{
+		Left,
+		Right
+	}
+
 	[Header("References")]
 	[SerializeField] private Polyline _line;
 	[SerializeField] private Polyline _goalRange;
@@ -108,15 +114,15 @@ public class Level : MonoBehaviour
 		}
 	}
 
-	public int BreakPerSide
+	public int BreaksPerSide
 	{
 		get
 		{
-			return _breaksPerSide;
+			return _boostsPerSide;
 		}
 		set
 		{
-			_breaksPerSide = value;
+			_boostsPerSide = value;
 		}
 	}
 
@@ -124,9 +130,6 @@ public class Level : MonoBehaviour
 
 	private float _leftDistance => _leftDot.DistanceOnPath;
 	private float _rightDistance => _rightDot.DistanceOnPath;
-
-	private float _leftX;
-	private float _rightX;
 
 	// spline / sampling data
 	private List<Vector3> _controlPoints;
@@ -140,6 +143,9 @@ public class Level : MonoBehaviour
 	private Dictionary<GameObject, (float startDistance, float endDistance)> _obstacleRanges;
 	private Dictionary<GameObject, (float startDistance, float endDistance)> _boostRanges;
 	private Dictionary<GameObject, (float startDistance, float endDistance)> _breakRanges;
+
+	// Track which side each obstacle belongs to
+	private Dictionary<GameObject, Side> _obstacleOwnership;
 
 	private System.Random _rng;
 
@@ -160,6 +166,7 @@ public class Level : MonoBehaviour
 		_obstacleRanges = new Dictionary<GameObject, (float startDistance, float endDistance)>();
 		_boostRanges = new Dictionary<GameObject, (float startDistance, float endDistance)>();
 		_breakRanges = new Dictionary<GameObject, (float startDistance, float endDistance)>();
+		_obstacleOwnership = new Dictionary<GameObject, Side>();
 
 		GenerateNewLevel();
 	}
@@ -174,13 +181,6 @@ public class Level : MonoBehaviour
 		if (Input.GetKeyDown(KeyCode.Return))
 		{
 			GenerateNewLevel();
-
-			return;
-		}
-
-		if(Input.GetKeyDown(KeyCode.Backspace))
-		{
-			GenerateGoal(_leftX, _rightX);
 
 			return;
 		}
@@ -254,13 +254,13 @@ public class Level : MonoBehaviour
 		var camHalfHeight = cam.orthographicSize;
 		var camHalfWidth = cam.aspect * camHalfHeight;
 
-		_leftX = cam.transform.position.x - camHalfWidth + _leftAndRightMargins;
-		_rightX = cam.transform.position.x + camHalfWidth - _leftAndRightMargins;
+		var leftX = cam.transform.position.x - camHalfWidth + _leftAndRightMargins;
+		var rightX = cam.transform.position.x + camHalfWidth - _leftAndRightMargins;
 
-		GeneratePath(_leftX, _rightX);
-		GenerateGoal(_leftX, _rightX);
+		GeneratePath(leftX, rightX);
+		GenerateGoal(leftX, rightX);
 
-		GenerateAllRanges(_leftX, _rightX);
+		GenerateAllRanges(leftX, rightX);
 
 		ResetDots();
 
@@ -411,6 +411,7 @@ public class Level : MonoBehaviour
 		ClearRanges(_obstacleRanges);
 		ClearRanges(_boostRanges);
 		ClearRanges(_breakRanges);
+		_obstacleOwnership.Clear();
 
 		// Calculate boundary distances
 		float? FindDistanceAtXThresholdLeft(float targetX)
@@ -446,15 +447,15 @@ public class Level : MonoBehaviour
 		var rightRegionStart = Mathf.Min(rightLimitDist, _goalEndDistance + _obstacleToGoalMargin);
 		var rightRegionEnd = rightLimitDist;
 
-		// Generate all range types
-		GenerateRangesOfType(RangeType.Obstacle, leftRegionStart, leftRegionEnd, _obstaclesPerSide);
-		GenerateRangesOfType(RangeType.Obstacle, rightRegionStart, rightRegionEnd, _obstaclesPerSide);
+		// Generate all range types for each side
+		GenerateRangesOfType(RangeType.Obstacle, leftRegionStart, leftRegionEnd, _obstaclesPerSide, Side.Left);
+		GenerateRangesOfType(RangeType.Obstacle, rightRegionStart, rightRegionEnd, _obstaclesPerSide, Side.Right);
 
-		GenerateRangesOfType(RangeType.Boost, leftRegionStart, leftRegionEnd, _boostsPerSide);
-		GenerateRangesOfType(RangeType.Boost, rightRegionStart, rightRegionEnd, _boostsPerSide);
+		GenerateRangesOfType(RangeType.Boost, leftRegionStart, leftRegionEnd, _boostsPerSide, Side.Left);
+		GenerateRangesOfType(RangeType.Boost, rightRegionStart, rightRegionEnd, _boostsPerSide, Side.Right);
 
-		GenerateRangesOfType(RangeType.Break, leftRegionStart, leftRegionEnd, _breaksPerSide);
-		GenerateRangesOfType(RangeType.Break, rightRegionStart, rightRegionEnd, _breaksPerSide);
+		GenerateRangesOfType(RangeType.Break, leftRegionStart, leftRegionEnd, _breaksPerSide, Side.Left);
+		GenerateRangesOfType(RangeType.Break, rightRegionStart, rightRegionEnd, _breaksPerSide, Side.Right);
 	}
 
 	private void ClearRanges(Dictionary<GameObject, (float startDistance, float endDistance)> ranges)
@@ -466,7 +467,7 @@ public class Level : MonoBehaviour
 		ranges.Clear();
 	}
 
-	private void GenerateRangesOfType(RangeType rangeType, float regionStart, float regionEnd, int count)
+	private void GenerateRangesOfType(RangeType rangeType, float regionStart, float regionEnd, int count, Side side)
 	{
 		// Get parameters based on range type
 		float minWidth, maxWidth;
@@ -585,6 +586,12 @@ public class Level : MonoBehaviour
 
 				targetDictionary.Add(newRange.gameObject, (startDistance, endDistance));
 
+				// Track ownership for obstacles
+				if (rangeType == RangeType.Obstacle)
+				{
+					_obstacleOwnership.Add(newRange.gameObject, side);
+				}
+
 				validPlacement = true;
 				break;
 			}
@@ -664,28 +671,37 @@ public class Level : MonoBehaviour
 		return null;
 	}
 
-	public bool IsDistanceInsideBoost(float distance)
+	public bool IsObstacleOwnedBySide(GameObject obstacle, Side side)
+	{
+		if (obstacle == null || !_obstacleOwnership.ContainsKey(obstacle))
+		{
+			return false;
+		}
+		return _obstacleOwnership[obstacle] == side;
+	}
+
+	public GameObject IsDistanceInsideBoost(float distance)
 	{
 		foreach (var boost in _boostRanges)
 		{
 			if (distance >= boost.Value.startDistance && distance <= boost.Value.endDistance)
 			{
-				return true;
+				return boost.Key;
 			}
 		}
-		return false;
+		return null;
 	}
 
-	public bool IsDistanceInsideBreak(float distance)
+	public GameObject IsDistanceInsideBreak(float distance)
 	{
 		foreach (var breakRange in _breakRanges)
 		{
 			if (distance >= breakRange.Value.startDistance && distance <= breakRange.Value.endDistance)
 			{
-				return true;
+				return breakRange.Key;
 			}
 		}
-		return false;
+		return null;
 	}
 
 	public Vector3 GetPositionAtDistance(float distance)
